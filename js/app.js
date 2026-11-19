@@ -54,9 +54,15 @@ const ultimo=(v,data,ignora)=>{const a=db.lancamentos.filter(l=>l.veiculoId===v.
 // Cadastros (veículos, motoristas, combustíveis, fornecedores)
 const cell=(f,r)=>f.chk?(r[f.k]?"Ativo":"Inativo"):f.sel?(get(f.sel,r[f.k])?.nome??"Sem vínculo"):r[f.k];
 const fld=f=>f.chk?`<label class=chk><input type=checkbox name=${f.k} checked> ${f.l}</label>`:`<label>${f.l}${f.sel?`<select name=${f.k}><option value="">Sem vínculo${db[f.sel].map(o=>`<option value=${o.id}>${esc(o.nome)}`).join("")}</select>`:`<input name=${f.k}${f.n?" type=number min=0 inputmode=numeric":""}${f.r?" required":""}>`}</label>`;
-function ctable(n,q=""){const c=ENT[n],rows=db[n].map(r=>({r,c:c.f.map(f=>cell(f,r))})).filter(x=>x.c.join(" ").toLowerCase().includes(q.toLowerCase())).sort((a,b)=>String(a.c[0]).localeCompare(b.c[0],"pt",{numeric:true}));
- return rows.length?`<div class=panel><div class="scroll cards"><table><tr>${c.f.map(f=>`<th>${f.l}`).join("")}${rows.map(x=>`<tr tabindex=0 data-a=edit data-n=${n} data-id=${x.r.id}>${x.c.map((v,i)=>`<td data-l="${c.f[i].l}">${esc(v)}`).join("")}`).join("")}</table></div></div>`:`<p class=empty>Nada encontrado.</p>`}
-const crud=n=>{const c=ENT[n];return`<h1>${c.t}</h1><form class="panel grid" data-f=crud data-n=${n}>${c.f.map(fld).join("")}<button class=go>Salvar</button><button type=button data-a=clear>Limpar</button></form><input class=search type=search data-i=q data-n=${n} placeholder="Pesquisar em ${c.t.toLowerCase()}" aria-label="Pesquisar"><div id=tb>${ctable(n)}</div>`};
+// Ordenação: clique no título da coluna (1º clique crescente, 2º decrescente)
+const ORD={lancamentos:{k:"data",d:-1},veiculos:{k:"0",d:1},motoristas:{k:"0",d:1},combustiveis:{k:"0",d:1},fornecedores:{k:"0",d:1}},
+cmp=(a,b)=>typeof a==="number"&&typeof b==="number"?a-b:String(a??"").localeCompare(String(b??""),"pt",{numeric:true}),
+th=(n,k,l,cls="")=>{const o=ORD[n],on=String(o.k)===String(k);return`<th${cls?` class=${cls}`:""} tabindex=0 data-a=ord data-n=${n} data-k=${k} aria-sort="${on?(o.d>0?"ascending":"descending"):"none"}">${l}${on?(o.d>0?" ▲":" ▼"):""}`},
+DICA=`<p class=dica>Dê dois cliques em uma linha para editar ou excluir.</p>`,
+BDEL=`<button type=button class=del data-a=del hidden>Excluir</button>`;
+function ctable(n,q=""){const c=ENT[n],o=ORD[n],rows=db[n].map(r=>({r,c:c.f.map(f=>cell(f,r))})).filter(x=>x.c.join(" ").toLowerCase().includes(q.toLowerCase())).sort((a,b)=>cmp(a.c[o.k],b.c[o.k])*o.d||cmp(a.c[0],b.c[0]));
+ return rows.length?`<div class=panel><div class="scroll cards"><table><tr>${c.f.map((f,i)=>th(n,i,f.l)).join("")}${rows.map(x=>`<tr tabindex=0 data-e=1 data-n=${n} data-id=${x.r.id}>${x.c.map((v,i)=>`<td data-l="${c.f[i].l}">${esc(v)}`).join("")}`).join("")}</table></div></div>`:`<p class=empty>Nada encontrado.</p>`}
+const crud=n=>{const c=ENT[n];return`<h1>${c.t}</h1><form class="panel grid" data-f=crud data-n=${n}>${c.f.map(fld).join("")}<button class=go>Salvar</button><button type=button data-a=clear>Limpar</button>${BDEL}</form>${DICA}<input class=search type=search data-i=q data-n=${n} placeholder="Pesquisar em ${c.t.toLowerCase()}" aria-label="Pesquisar"><div id=tb>${ctable(n)}</div>`};
 function salvaCrud(f){const n=f.dataset.n,c=ENT[n],fd=new FormData(f),r={};
  c.f.forEach(x=>{const v=fd.get(x.k);r[x.k]=x.chk?v!==null:x.sel?(v?+v:null):x.n?(+v||0):x.up?v.trim().toUpperCase():v.trim()});
  for(const x of c.f)if(x.r&&!r[x.k])return toast(`${x.l} é obrigatório.`,1);
@@ -69,7 +75,7 @@ const rot=o=>`${o.codigo} – ${o.nome}`,
 achar=(t,txt)=>{const x=txt.trim().toLowerCase();return db[t].find(o=>[rot(o),String(o.codigo),o.nome].some(s=>s.toLowerCase()===x))},
 opts=t=>db[t].map(o=>`<option value="${esc(rot(o))}">`).join(""),
 ultData=()=>{let d;try{d=localStorage.getItem("cc-data")}catch{}return d||new Date().toLocaleDateString("sv-SE")};
-const lanc=()=>`<h1>Lançamentos</h1><form class="panel grid" data-f=lanc>
+const lanc=()=>`<h1>Lançamentos</h1><form class="panel grid" data-f=lanc data-n=lancamentos>
 <label>Frota<input name=frota type=number min=1 required inputmode=numeric data-i=frota></label>
 <div class=info id=info></div>
 <label>Data<input name=data type=date required value="${ultData()}"></label>
@@ -79,11 +85,13 @@ const lanc=()=>`<h1>Lançamentos</h1><form class="panel grid" data-f=lanc>
 <label>Combustível<input name=combustivel list=dl-comb required autocomplete=off placeholder="Código ou nome"><datalist id=dl-comb>${opts("combustiveis")}</datalist></label>
 <label>Fornecedor<input name=fornecedor list=dl-forn required autocomplete=off placeholder="Código ou nome"><datalist id=dl-forn>${opts("fornecedores")}</datalist></label>
 <label>Nota fiscal<input name=nf></label><label>Série<input name=serie></label>
-<button class=go>Cadastrar</button><button type=button data-a=clear>Limpar</button></form>
+<button class=go>Cadastrar</button><button type=button data-a=clear>Limpar</button>${BDEL}</form>${DICA}
 <div class=bar><input class=search type=search data-i=lq placeholder="Pesquisar por frota, placa, motorista, fornecedor ou nota" aria-label="Pesquisar lançamentos"><label class=chk><input type=checkbox id=oq data-i=lq> Só hodômetro quebrado</label></div><div id=tb></div>`;
-function lrows(ls,edit){return ls.length?`<div class=panel><div class="scroll cards"><table><tr><th>Data<th>Frota<th>Placa<th>Motorista<th class=r>KM<th class=r>Litros<th>Combustível<th>Fornecedor<th>Nota</tr>`+ls.map(l=>{const v=get("veiculos",l.veiculoId);return`<tr${edit?` tabindex=0 data-a=edit data-n=lancamentos data-id=${l.id}`:""}><td data-l=Data>${dt(l.data)}<td data-l=Frota>${v.frota}<td data-l=Placa>${esc(v.placa)}<td data-l=Motorista>${esc(get("motoristas",l.motoristaId)?.nome)}<td class=r data-l=KM>${l.quebrado?`<span class=tag>Quebrado</span>`:nf(l.km,0)}<td class=r data-l=Litros>${nf(l.litros)}<td data-l=Combustível>${esc(get("combustiveis",l.combustivelId)?.nome)}<td data-l=Fornecedor>${esc(get("fornecedores",l.fornecedorId)?.nome)}<td data-l=Nota>${esc(l.nf)}${l.serie?"/"+esc(l.serie):""}`}).join("")+`</table></div></div>`:`<p class=empty>Nenhum lançamento encontrado.</p>`}
-function lrefresh(){const v=db.veiculos.find(x=>x.frota==$("[name=frota]").value),q=$(".search").value.toLowerCase(),oq=$("#oq").checked;
- $("#tb").innerHTML=lrows(db.lancamentos.filter(l=>{const x=get("veiculos",l.veiculoId);return(!v||l.veiculoId===v.id)&&(!oq||l.quebrado)&&[x.frota,x.placa,get("motoristas",l.motoristaId)?.nome,get("fornecedores",l.fornecedorId)?.nome,l.nf].join(" ").toLowerCase().includes(q)}).sort((a,b)=>by(b,a)).slice(0,100),1)}
+const SV={data:l=>l.data,frota:l=>get("veiculos",l.veiculoId).frota,placa:l=>get("veiculos",l.veiculoId).placa,motorista:l=>get("motoristas",l.motoristaId)?.nome,km:l=>l.quebrado?-1:l.km,litros:l=>l.litros,comb:l=>get("combustiveis",l.combustivelId)?.nome,forn:l=>get("fornecedores",l.fornecedorId)?.nome,nf:l=>l.nf},
+H=[["Data","data"],["Frota","frota"],["Placa","placa"],["Motorista","motorista"],["KM","km","r"],["Litros","litros","r"],["Combustível","comb"],["Fornecedor","forn"],["Nota","nf"]];
+function lrows(ls,edit){return ls.length?`<div class=panel><div class="scroll cards"><table><tr>${edit?H.map(h=>th("lancamentos",h[1],h[0],h[2])).join(""):"<th>Data<th>Frota<th>Placa<th>Motorista<th class=r>KM<th class=r>Litros<th>Combustível<th>Fornecedor<th>Nota"}</tr>`+ls.map(l=>{const v=get("veiculos",l.veiculoId);return`<tr${edit?` tabindex=0 data-e=1 data-n=lancamentos data-id=${l.id}`:""}><td data-l=Data>${dt(l.data)}<td data-l=Frota>${v.frota}<td data-l=Placa>${esc(v.placa)}<td data-l=Motorista>${esc(get("motoristas",l.motoristaId)?.nome)}<td class=r data-l=KM>${l.quebrado?`<span class=tag>Quebrado</span>`:nf(l.km,0)}<td class=r data-l=Litros>${nf(l.litros)}<td data-l=Combustível>${esc(get("combustiveis",l.combustivelId)?.nome)}<td data-l=Fornecedor>${esc(get("fornecedores",l.fornecedorId)?.nome)}<td data-l=Nota>${esc(l.nf)}${l.serie?"/"+esc(l.serie):""}`}).join("")+`</table></div></div>`:`<p class=empty>Nenhum lançamento encontrado.</p>`}
+function lrefresh(){const o=ORD.lancamentos,v=db.veiculos.find(x=>x.frota==$("[name=frota]").value),q=$(".search").value.toLowerCase(),oq=$("#oq").checked;
+ $("#tb").innerHTML=lrows(db.lancamentos.filter(l=>{const x=get("veiculos",l.veiculoId);return(!v||l.veiculoId===v.id)&&(!oq||l.quebrado)&&[x.frota,x.placa,get("motoristas",l.motoristaId)?.nome,get("fornecedores",l.fornecedorId)?.nome,l.nf].join(" ").toLowerCase().includes(q)}).sort((a,b)=>cmp(SV[o.k](a),SV[o.k](b))*o.d||b.id-a.id).slice(0,100),1)}
 function finfo(){const f=$("[name=frota]"),v=db.veiculos.find(x=>x.frota==f.value);
  $("#info").innerHTML=!f.value?"Informe a frota.":!v?`<b class=badtxt>Frota não encontrada.</b>`:!v.ativo?`<b class=badtxt>Frota inativa.</b>`:`<b>${esc(v.placa)}</b> ${esc(v.modelo)}<br>${esc(get("motoristas",v.motoristaId)?.nome??"Sem motorista vinculado")}<br>KM anterior: ${nf(ultimo(v,"9999",0),0)}`;lrefresh()}
 function salvaLanc(f){const fd=Object.fromEntries(new FormData(f)),v=db.veiculos.find(x=>x.frota==fd.frota&&x.ativo);
@@ -153,15 +161,23 @@ function demo(){if(REMOTE)return toast("Dados de exemplo só no modo local.",1);
    db.lancamentos.push({id:++i,veiculoId:k+1,motoristaId:k+1,data:`2026-${p2(m)}-${p2(d)}`,km:qb?0:Math.round(km),litros:lt,combustivelId:cb,fornecedorId:R()<.6?1:2,nf:String(1000+i),serie:"1",quebrado:qb})}});
  S.v=null;S.meses.clear();save();route()}
 
+// Onde cada cadastro é usado (impede excluir o que tem vínculo)
+const USO={veiculos:[["lancamentos","veiculoId"]],motoristas:[["veiculos","motoristaId"],["lancamentos","motoristaId"]],combustiveis:[["lancamentos","combustivelId"]],fornecedores:[["lancamentos","fornecedorId"]]};
 const tog=(s,x)=>s.has(x)?s.delete(x):s.add(x);
 const A={
  demo,
  sair(){if(REMOTE)sb.auth.signOut();localStorage.removeItem("cc-user");sessionStorage.removeItem("cc-user");user=null;delete document.body.dataset.auth;location.hash="";$("main").innerHTML="";$("#login input").focus()},
  clear(){ed=0;route()},
- edit(el){const n=el.dataset.n,r=get(n,el.dataset.id),f=$("form");ed=r.id;
+ ord(el){const n=el.dataset.n,k=el.dataset.k,o=ORD[n];ORD[n]=String(o.k)===k?{k,d:-o.d}:{k,d:1};n==="lancamentos"?lrefresh():$("#tb").innerHTML=ctable(n,$(".search").value);
+  const h=$(`th[data-n=${n}][data-k="${k}"]`);if(h)h.focus()},
+ del(){if(!ed)return;const n=$("main form").dataset.n,uso=USO[n]?.map(([t,c])=>db[t].filter(x=>x[c]===ed).length).reduce((a,b)=>a+b,0)||0;
+  if(uso)return toast(`Não é possível excluir: este cadastro é usado em ${uso} registro(s).${db[n][0]&&"ativo"in db[n][0]?" Desmarque \"Ativo\" em vez de excluir.":""}`,1);
+  if(!confirm("Excluir este registro? Essa ação não pode ser desfeita."))return;
+  db[n]=db[n].filter(x=>x.id!==ed);save();toast("Excluído.");ed=0;route()},
+ edit(el){const n=el.dataset.n,r=get(n,el.dataset.id),f=$("main form");ed=r.id;
   if(n==="lancamentos"){f.frota.value=get("veiculos",r.veiculoId).frota;["data","km","litros","nf","serie"].forEach(k=>f[k].value=r[k]||"");f.combustivel.value=rot(get("combustiveis",r.combustivelId));f.fornecedor.value=rot(get("fornecedores",r.fornecedorId));f.quebrado.checked=r.quebrado;f.km.disabled=r.quebrado;f.frota.readOnly=true;finfo()}
   else ENT[n].f.forEach(x=>{const e=f[x.k];x.chk?e.checked=r[x.k]:e.value=r[x.k]??"";if(x.lock)e.readOnly=true});
-  const b=f.querySelector(".go");b.textContent="Alterar";b.classList.add("ed");f.scrollIntoView({block:"nearest"})},
+  const b=f.querySelector(".go");b.textContent="Alterar";b.classList.add("ed");f.querySelector("[data-a=del]").hidden=false;f.scrollIntoView({block:"nearest"})},
  pick(el){S.v=el.dataset.id==="all"?"all":+el.dataset.id;S.roll=1;route()},
  ano(el){tog(S.anos,+el.dataset.id);route()},
  mes(el){tog(S.meses,+el.dataset.id);route()},
@@ -177,8 +193,12 @@ const I={
  dq(t){S.q=t.value;$("#vc").innerHTML=vchips()},
  comb(t){S.comb=t.value;route()},forn(t){S.forn=t.value;route()},
  file(t){t.files[0]?.text().then(x=>$("#js").value=x)}};
-document.addEventListener("click",e=>{const el=e.target.closest("[data-a]");if(el)A[el.dataset.a](el)});
-document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.matches("tr[data-a]"))e.target.click()});
+let ultimoClique={};
+document.addEventListener("click",e=>{
+ const tr=e.target.closest("tr[data-e]");
+ if(tr){const k=tr.dataset.n+":"+tr.dataset.id,t=Date.now();if(ultimoClique.k===k&&t-ultimoClique.t<450){ultimoClique={};A.edit(tr)}else ultimoClique={k,t};return}
+ const el=e.target.closest("[data-a]");if(el)A[el.dataset.a](el)});
+document.addEventListener("keydown",e=>{if(e.key!=="Enter")return;const t=e.target;if(t.matches("tr[data-e]"))A.edit(t);else if(t.matches("th[data-a]"))A.ord(t)});
 document.addEventListener("input",e=>{const i=e.target.dataset.i;if(i)I[i](e.target)});
 document.addEventListener("submit",e=>{e.preventDefault();({lanc:salvaLanc,crud:salvaCrud,login:entrar})[e.target.dataset.f](e.target)});
 
