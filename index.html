@@ -28,13 +28,15 @@
 <div class="app">
  <header class="top">
   <div class="brand"><svg aria-hidden="true"><use href="#pump"/></svg>Frota União</div>
-  <nav><a href="#painel">Painel</a><a href="#lancamentos">Lançamentos</a><a href="#veiculos">Veículos</a><a href="#motoristas">Motoristas</a><a href="#combustiveis">Combustíveis</a><a href="#fornecedores">Fornecedores</a><a href="#backup">Backup</a></nav>
+  <nav></nav>
   <div class="who"><span id="nome"></span><button data-a="sair">Sair</button></div>
  </header>
  <main></main>
  <a class="fab" href="#lancamentos">+ Lançar</a>
 </div>
 <div id="toast" role="status" hidden></div>
+<dialog id="dlg"></dialog>
+<div id="load" role="status" aria-label="Carregando" hidden><span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="js/config.js"></script>
 <script src="js/app.js"></script>

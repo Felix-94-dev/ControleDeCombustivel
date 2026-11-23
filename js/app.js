@@ -17,14 +17,15 @@ ENT={
 // Camada de dados: só load() e save() tocam o armazenamento.
 // Com js/config.js preenchido usa o Supabase (login + banco); sem ele, funciona local (localStorage) para testes.
 const CFG=window.SUPABASE_CONFIG||{},REMOTE=!!(CFG.url&&CFG.anonKey&&window.supabase),
-sb=REMOTE?supabase.createClient(CFG.url,CFG.anonKey):null,
+sb=REMOTE?supabase.createClient(CFG.url,CFG.anonKey,{auth:{persistSession:false}}):null,
 TABELAS=["motoristas","combustiveis","fornecedores","veiculos","lancamentos"], // ordem respeita as chaves estrangeiras
 snake=k=>k.replace(/[A-Z]/g,c=>"_"+c.toLowerCase()),camel=k=>k.replace(/_([a-z])/g,(_,c)=>c.toUpperCase()),
 conv=(o,fn)=>Object.fromEntries(Object.entries(o).map(([k,v])=>[fn(k),v]));
 let db,snap={},fila=Promise.resolve(),user=null;
+if(REMOTE){try{Object.keys(localStorage).filter(k=>/^sb-.*-auth-token/.test(k)).forEach(k=>localStorage.removeItem(k))}catch{}}
 if(!REMOTE){try{db=JSON.parse(localStorage.getItem(KEY))}catch{}user=localStorage.getItem("cc-user")||sessionStorage.getItem("cc-user")}
 db=db||fresh();
-let ed=0,pre=0;
+let ed=0,pre=0,pend=0;
 const S={v:null,anos:new Set,meses:new Set,comb:"",forn:"",q:"",roll:0};
 const tira=()=>{snap={};for(const t of TABELAS){snap[t]=new Map(db[t].map(r=>[r.id,JSON.stringify(r)]))}};
 async function load(){
@@ -54,15 +55,9 @@ const ultimo=(v,data,ignora)=>{const a=db.lancamentos.filter(l=>l.veiculoId===v.
 // Cadastros (veículos, motoristas, combustíveis, fornecedores)
 const cell=(f,r)=>f.chk?(r[f.k]?"Ativo":"Inativo"):f.sel?(get(f.sel,r[f.k])?.nome??"Sem vínculo"):r[f.k];
 const fld=f=>f.chk?`<label class=chk><input type=checkbox name=${f.k} checked> ${f.l}</label>`:`<label>${f.l}${f.sel?`<select name=${f.k}><option value="">Sem vínculo${db[f.sel].map(o=>`<option value=${o.id}>${esc(o.nome)}`).join("")}</select>`:`<input name=${f.k}${f.n?" type=number min=0 inputmode=numeric":""}${f.r?" required":""}>`}</label>`;
-// Ordenação: clique no título da coluna (1º clique crescente, 2º decrescente)
-const ORD={lancamentos:{k:"data",d:-1},veiculos:{k:"0",d:1},motoristas:{k:"0",d:1},combustiveis:{k:"0",d:1},fornecedores:{k:"0",d:1}},
-cmp=(a,b)=>typeof a==="number"&&typeof b==="number"?a-b:String(a??"").localeCompare(String(b??""),"pt",{numeric:true}),
-th=(n,k,l,cls="")=>{const o=ORD[n],on=String(o.k)===String(k);return`<th${cls?` class=${cls}`:""} tabindex=0 data-a=ord data-n=${n} data-k=${k} aria-sort="${on?(o.d>0?"ascending":"descending"):"none"}">${l}${on?(o.d>0?" ▲":" ▼"):""}`},
-DICA=`<p class=dica>Dê dois cliques em uma linha para editar ou excluir.</p>`,
-BDEL=`<button type=button class=del data-a=del hidden>Excluir</button>`;
-function ctable(n,q=""){const c=ENT[n],o=ORD[n],rows=db[n].map(r=>({r,c:c.f.map(f=>cell(f,r))})).filter(x=>x.c.join(" ").toLowerCase().includes(q.toLowerCase())).sort((a,b)=>cmp(a.c[o.k],b.c[o.k])*o.d||cmp(a.c[0],b.c[0]));
- return rows.length?`<div class=panel><div class="scroll cards"><table><tr>${c.f.map((f,i)=>th(n,i,f.l)).join("")}${rows.map(x=>`<tr tabindex=0 data-e=1 data-n=${n} data-id=${x.r.id}>${x.c.map((v,i)=>`<td data-l="${c.f[i].l}">${esc(v)}`).join("")}`).join("")}</table></div></div>`:`<p class=empty>Nada encontrado.</p>`}
-const crud=n=>{const c=ENT[n];return`<h1>${c.t}</h1><form class="panel grid" data-f=crud data-n=${n}>${c.f.map(fld).join("")}<button class=go>Salvar</button><button type=button data-a=clear>Limpar</button>${BDEL}</form>${DICA}<input class=search type=search data-i=q data-n=${n} placeholder="Pesquisar em ${c.t.toLowerCase()}" aria-label="Pesquisar"><div id=tb>${ctable(n)}</div>`};
+function ctable(n,q=""){const c=ENT[n],rows=db[n].map(r=>({r,c:c.f.map(f=>cell(f,r))})).filter(x=>x.c.join(" ").toLowerCase().includes(q.toLowerCase())).sort((a,b)=>String(a.c[0]).localeCompare(b.c[0],"pt",{numeric:true}));
+ return rows.length?`<div class=panel>${dica()}<div class="scroll cards"><table><tr>${c.f.map(f=>`<th>${f.l}`).join("")}${rows.map(x=>`<tr tabindex=0 data-r data-n=${n} data-id=${x.r.id}>${x.c.map((v,i)=>`<td data-l="${c.f[i].l}">${esc(v)}`).join("")}`).join("")}</table></div></div>`:`<p class=empty>Nada encontrado.</p>`}
+const crud=n=>{const c=ENT[n];return`<h1>${c.t}</h1><form class="panel grid" data-f=crud data-n=${n}>${c.f.map(fld).join("")}<button class=go>Salvar</button><button type=button data-a=clear>Limpar</button></form><input class=search type=search data-i=q data-n=${n} placeholder="Pesquisar em ${c.t.toLowerCase()}" aria-label="Pesquisar"><div id=tb>${ctable(n)}</div>`};
 function salvaCrud(f){const n=f.dataset.n,c=ENT[n],fd=new FormData(f),r={};
  c.f.forEach(x=>{const v=fd.get(x.k);r[x.k]=x.chk?v!==null:x.sel?(v?+v:null):x.n?(+v||0):x.up?v.trim().toUpperCase():v.trim()});
  for(const x of c.f)if(x.r&&!r[x.k])return toast(`${x.l} é obrigatório.`,1);
@@ -75,7 +70,7 @@ const rot=o=>`${o.codigo} – ${o.nome}`,
 achar=(t,txt)=>{const x=txt.trim().toLowerCase();return db[t].find(o=>[rot(o),String(o.codigo),o.nome].some(s=>s.toLowerCase()===x))},
 opts=t=>db[t].map(o=>`<option value="${esc(rot(o))}">`).join(""),
 ultData=()=>{let d;try{d=localStorage.getItem("cc-data")}catch{}return d||new Date().toLocaleDateString("sv-SE")};
-const lanc=()=>`<h1>Lançamentos</h1><form class="panel grid" data-f=lanc data-n=lancamentos>
+const lanc=()=>`<h1>Lançamentos</h1><form class="panel grid" data-f=lanc>
 <label>Frota<input name=frota type=number min=1 required inputmode=numeric data-i=frota></label>
 <div class=info id=info></div>
 <label>Data<input name=data type=date required value="${ultData()}"></label>
@@ -85,13 +80,11 @@ const lanc=()=>`<h1>Lançamentos</h1><form class="panel grid" data-f=lanc data-n
 <label>Combustível<input name=combustivel list=dl-comb required autocomplete=off placeholder="Código ou nome"><datalist id=dl-comb>${opts("combustiveis")}</datalist></label>
 <label>Fornecedor<input name=fornecedor list=dl-forn required autocomplete=off placeholder="Código ou nome"><datalist id=dl-forn>${opts("fornecedores")}</datalist></label>
 <label>Nota fiscal<input name=nf></label><label>Série<input name=serie></label>
-<button class=go>Cadastrar</button><button type=button data-a=clear>Limpar</button>${BDEL}</form>${DICA}
+<button class=go>Cadastrar</button><button type=button data-a=clear>Limpar</button></form>
 <div class=bar><input class=search type=search data-i=lq placeholder="Pesquisar por frota, placa, motorista, fornecedor ou nota" aria-label="Pesquisar lançamentos"><label class=chk><input type=checkbox id=oq data-i=lq> Só hodômetro quebrado</label></div><div id=tb></div>`;
-const SV={data:l=>l.data,frota:l=>get("veiculos",l.veiculoId).frota,placa:l=>get("veiculos",l.veiculoId).placa,motorista:l=>get("motoristas",l.motoristaId)?.nome,km:l=>l.quebrado?-1:l.km,litros:l=>l.litros,comb:l=>get("combustiveis",l.combustivelId)?.nome,forn:l=>get("fornecedores",l.fornecedorId)?.nome,nf:l=>l.nf},
-H=[["Data","data"],["Frota","frota"],["Placa","placa"],["Motorista","motorista"],["KM","km","r"],["Litros","litros","r"],["Combustível","comb"],["Fornecedor","forn"],["Nota","nf"]];
-function lrows(ls,edit){return ls.length?`<div class=panel><div class="scroll cards"><table><tr>${edit?H.map(h=>th("lancamentos",h[1],h[0],h[2])).join(""):"<th>Data<th>Frota<th>Placa<th>Motorista<th class=r>KM<th class=r>Litros<th>Combustível<th>Fornecedor<th>Nota"}</tr>`+ls.map(l=>{const v=get("veiculos",l.veiculoId);return`<tr${edit?` tabindex=0 data-e=1 data-n=lancamentos data-id=${l.id}`:""}><td data-l=Data>${dt(l.data)}<td data-l=Frota>${v.frota}<td data-l=Placa>${esc(v.placa)}<td data-l=Motorista>${esc(get("motoristas",l.motoristaId)?.nome)}<td class=r data-l=KM>${l.quebrado?`<span class=tag>Quebrado</span>`:nf(l.km,0)}<td class=r data-l=Litros>${nf(l.litros)}<td data-l=Combustível>${esc(get("combustiveis",l.combustivelId)?.nome)}<td data-l=Fornecedor>${esc(get("fornecedores",l.fornecedorId)?.nome)}<td data-l=Nota>${esc(l.nf)}${l.serie?"/"+esc(l.serie):""}`}).join("")+`</table></div></div>`:`<p class=empty>Nenhum lançamento encontrado.</p>`}
-function lrefresh(){const o=ORD.lancamentos,v=db.veiculos.find(x=>x.frota==$("[name=frota]").value),q=$(".search").value.toLowerCase(),oq=$("#oq").checked;
- $("#tb").innerHTML=lrows(db.lancamentos.filter(l=>{const x=get("veiculos",l.veiculoId);return(!v||l.veiculoId===v.id)&&(!oq||l.quebrado)&&[x.frota,x.placa,get("motoristas",l.motoristaId)?.nome,get("fornecedores",l.fornecedorId)?.nome,l.nf].join(" ").toLowerCase().includes(q)}).sort((a,b)=>cmp(SV[o.k](a),SV[o.k](b))*o.d||b.id-a.id).slice(0,100),1)}
+function lrows(ls){return ls.length?`<div class=panel>${dica()}<div class="scroll cards"><table><tr><th>Data<th>Frota<th>Placa<th>Motorista<th class=r>KM<th class=r>Litros<th>Combustível<th>Fornecedor<th>Nota</tr>`+ls.map(l=>{const v=get("veiculos",l.veiculoId);return`<tr tabindex=0 data-r data-n=lancamentos data-id=${l.id}><td data-l=Data>${dt(l.data)}<td data-l=Frota>${v.frota}<td data-l=Placa>${esc(v.placa)}<td data-l=Motorista>${esc(get("motoristas",l.motoristaId)?.nome)}<td class=r data-l=KM>${l.quebrado?`<span class=tag>Quebrado</span>`:nf(l.km,0)}<td class=r data-l=Litros>${nf(l.litros)}<td data-l=Combustível>${esc(get("combustiveis",l.combustivelId)?.nome)}<td data-l=Fornecedor>${esc(get("fornecedores",l.fornecedorId)?.nome)}<td data-l=Nota>${esc(l.nf)}${l.serie?"/"+esc(l.serie):""}`}).join("")+`</table></div></div>`:`<p class=empty>Nenhum lançamento encontrado.</p>`}
+function lrefresh(){const v=db.veiculos.find(x=>x.frota==$("[name=frota]").value),q=$(".search").value.toLowerCase(),oq=$("#oq").checked;
+ $("#tb").innerHTML=lrows(db.lancamentos.filter(l=>{const x=get("veiculos",l.veiculoId);return(!v||l.veiculoId===v.id)&&(!oq||l.quebrado)&&[x.frota,x.placa,get("motoristas",l.motoristaId)?.nome,get("fornecedores",l.fornecedorId)?.nome,l.nf].join(" ").toLowerCase().includes(q)}).sort((a,b)=>by(b,a)).slice(0,100))}
 function finfo(){const f=$("[name=frota]"),v=db.veiculos.find(x=>x.frota==f.value);
  $("#info").innerHTML=!f.value?"Informe a frota.":!v?`<b class=badtxt>Frota não encontrada.</b>`:!v.ativo?`<b class=badtxt>Frota inativa.</b>`:`<b>${esc(v.placa)}</b> ${esc(v.modelo)}<br>${esc(get("motoristas",v.motoristaId)?.nome??"Sem motorista vinculado")}<br>KM anterior: ${nf(ultimo(v,"9999",0),0)}`;lrefresh()}
 function salvaLanc(f){const fd=Object.fromEntries(new FormData(f)),v=db.veiculos.find(x=>x.frota==fd.frota&&x.ativo);
@@ -161,23 +154,40 @@ function demo(){if(REMOTE)return toast("Dados de exemplo só no modo local.",1);
    db.lancamentos.push({id:++i,veiculoId:k+1,motoristaId:k+1,data:`2026-${p2(m)}-${p2(d)}`,km:qb?0:Math.round(km),litros:lt,combustivelId:cb,fornecedorId:R()<.6?1:2,nf:String(1000+i),serie:"1",quebrado:qb})}});
  S.v=null;S.meses.clear();save();route()}
 
-// Onde cada cadastro é usado (impede excluir o que tem vínculo)
-const USO={veiculos:[["lancamentos","veiculoId"]],motoristas:[["veiculos","motoristaId"],["lancamentos","motoristaId"]],combustiveis:[["lancamentos","combustivelId"]],fornecedores:[["lancamentos","fornecedorId"]]};
+// Editar e excluir: dois cliques (ou toque, no celular) em uma linha abrem este menu.
+const UM={lancamentos:"Lançamento",veiculos:"Veículo",motoristas:"Motorista",combustiveis:"Combustível",fornecedores:"Fornecedor"},
+REF={lancamentos:[],veiculos:[["lancamentos","veiculoId"]],combustiveis:[["lancamentos","combustivelId"]],fornecedores:[["lancamentos","fornecedorId"]],motoristas:[["lancamentos","motoristaId"],["veiculos","motoristaId"]]},
+dlg=$("#dlg"),busy=on=>{$("#load").hidden=!on},
+dica=()=>`<small class=hint>${matchMedia("(pointer:coarse)").matches?"Toque":"Dê dois cliques"} em uma linha para editar ou excluir.</small>`;
+function menu(tr){if(dlg.open)return;const n=tr.dataset.n,r=get(n,tr.dataset.id);if(!r)return;
+ const t=n==="lancamentos"?`${dt(r.data)} – frota ${get("veiculos",r.veiculoId)?.frota} – ${nf(r.litros)} L`:ENT[n].f.slice(0,2).map(f=>cell(f,r)).join(" – ");
+ dlg.dataset.n=n;dlg.dataset.id=r.id;
+ dlg.innerHTML=`<div class=dbox><h2>${UM[n]}</h2><p>${esc(t)}</p><p id=dmsg class=badtxt hidden>Esta ação não pode ser desfeita.</p><div class=btns><button class=go data-a=dedit>Editar</button><button class=perigo data-a=dexc>Excluir</button><button data-a=dfecha>Fechar</button></div></div>`;
+ dlg.showModal()}
+function excluir(n,id){
+ const uso=REF[n].map(([t,k])=>[t,db[t].filter(r=>r[k]==id).length]).filter(x=>x[1]).map(([t,c])=>`${c} ${t==="lancamentos"?"lançamento(s)":"veículo(s)"}`);
+ dlg.close();
+ if(uso.length)return toast(`Não é possível excluir: está em ${uso.join(" e ")}.${ENT[n]?.f.some(f=>f.k==="ativo")?" Desmarque Ativo para deixar de usar.":""}`,1);
+ db[n]=db[n].filter(r=>r.id!=id);
+ if(S.v!==null&&S.v!=="all"&&!db.lancamentos.some(l=>l.veiculoId===S.v))S.v=null;
+ save();toast("Excluído.");ed=0;route()}
+
 const tog=(s,x)=>s.has(x)?s.delete(x):s.add(x);
 const A={
  demo,
- sair(){if(REMOTE)sb.auth.signOut();localStorage.removeItem("cc-user");sessionStorage.removeItem("cc-user");user=null;delete document.body.dataset.auth;location.hash="";$("main").innerHTML="";$("#login input").focus()},
+ sair(){if(REMOTE)sb.auth.signOut();localStorage.removeItem("cc-user");sessionStorage.removeItem("cc-user");user=null;perfil=null;$("nav").innerHTML="";delete document.body.dataset.auth;location.hash="";$("main").innerHTML="";$("#login input").focus()},
  clear(){ed=0;route()},
- ord(el){const n=el.dataset.n,k=el.dataset.k,o=ORD[n];ORD[n]=String(o.k)===k?{k,d:-o.d}:{k,d:1};n==="lancamentos"?lrefresh():$("#tb").innerHTML=ctable(n,$(".search").value);
-  const h=$(`th[data-n=${n}][data-k="${k}"]`);if(h)h.focus()},
- del(){if(!ed)return;const n=$("main form").dataset.n,uso=USO[n]?.map(([t,c])=>db[t].filter(x=>x[c]===ed).length).reduce((a,b)=>a+b,0)||0;
-  if(uso)return toast(`Não é possível excluir: este cadastro é usado em ${uso} registro(s).${db[n][0]&&"ativo"in db[n][0]?" Desmarque \"Ativo\" em vez de excluir.":""}`,1);
-  if(!confirm("Excluir este registro? Essa ação não pode ser desfeita."))return;
-  db[n]=db[n].filter(x=>x.id!==ed);save();toast("Excluído.");ed=0;route()},
+ dedit(){const{n,id}=dlg.dataset;dlg.close();if(n==="lancamentos"&&document.body.dataset.p!=="lancamentos"){pend=id;location.hash="lancamentos"}else A.edit({dataset:{n,id}})},
+ dexc(el){const{n,id}=dlg.dataset;if(!el.dataset.c){el.dataset.c=1;el.textContent="Confirmar exclusão";$("#dmsg").hidden=false;return}excluir(n,id)},
+ dfecha(){dlg.close()},
+ uedit(el){const u=USR.find(x=>x.id===el.dataset.id),f=$("main form");ed=u.id;
+  f.nome.value=u.nome;f.email.value=u.email;f.senha.value="";f.senha.required=false;f.senha.placeholder="Nova senha (vazio mantém a atual)";
+  f.querySelectorAll("[name=perm]").forEach(c=>{c.checked=u.role==="master"||u.permissoes.includes(c.value);c.disabled=u.role==="master"});
+  const b=f.querySelector(".go");b.textContent="Salvar alterações";b.classList.add("ed");f.scrollIntoView({block:"nearest"})},
  edit(el){const n=el.dataset.n,r=get(n,el.dataset.id),f=$("main form");ed=r.id;
   if(n==="lancamentos"){f.frota.value=get("veiculos",r.veiculoId).frota;["data","km","litros","nf","serie"].forEach(k=>f[k].value=r[k]||"");f.combustivel.value=rot(get("combustiveis",r.combustivelId));f.fornecedor.value=rot(get("fornecedores",r.fornecedorId));f.quebrado.checked=r.quebrado;f.km.disabled=r.quebrado;f.frota.readOnly=true;finfo()}
   else ENT[n].f.forEach(x=>{const e=f[x.k];x.chk?e.checked=r[x.k]:e.value=r[x.k]??"";if(x.lock)e.readOnly=true});
-  const b=f.querySelector(".go");b.textContent="Alterar";b.classList.add("ed");f.querySelector("[data-a=del]").hidden=false;f.scrollIntoView({block:"nearest"})},
+  const b=f.querySelector(".go");b.textContent="Alterar";b.classList.add("ed");f.scrollIntoView({block:"nearest"})},
  pick(el){S.v=el.dataset.id==="all"?"all":+el.dataset.id;S.roll=1;route()},
  ano(el){tog(S.anos,+el.dataset.id);route()},
  mes(el){tog(S.meses,+el.dataset.id);route()},
@@ -193,38 +203,73 @@ const I={
  dq(t){S.q=t.value;$("#vc").innerHTML=vchips()},
  comb(t){S.comb=t.value;route()},forn(t){S.forn=t.value;route()},
  file(t){t.files[0]?.text().then(x=>$("#js").value=x)}};
-let ultimoClique={};
-document.addEventListener("click",e=>{
- const tr=e.target.closest("tr[data-e]");
- if(tr){const k=tr.dataset.n+":"+tr.dataset.id,t=Date.now();if(ultimoClique.k===k&&t-ultimoClique.t<450){ultimoClique={};A.edit(tr)}else ultimoClique={k,t};return}
- const el=e.target.closest("[data-a]");if(el)A[el.dataset.a](el)});
-document.addEventListener("keydown",e=>{if(e.key!=="Enter")return;const t=e.target;if(t.matches("tr[data-e]"))A.edit(t);else if(t.matches("th[data-a]"))A.ord(t)});
+document.addEventListener("click",e=>{const el=e.target.closest("[data-a]");if(el)A[el.dataset.a](el);else if(matchMedia("(pointer:coarse)").matches){const r=e.target.closest("tr[data-r]");if(r)menu(r)}});
+document.addEventListener("dblclick",e=>{const r=e.target.closest("tr[data-r]");if(r)menu(r)});
+dlg.addEventListener("click",e=>{if(e.target===dlg)dlg.close()});
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.matches("tr[data-r]"))menu(e.target)});
 document.addEventListener("input",e=>{const i=e.target.dataset.i;if(i)I[i](e.target)});
-document.addEventListener("submit",e=>{e.preventDefault();({lanc:salvaLanc,crud:salvaCrud,login:entrar})[e.target.dataset.f](e.target)});
+document.addEventListener("submit",e=>{e.preventDefault();({lanc:salvaLanc,crud:salvaCrud,login:entrar,usuario:salvaUsuario})[e.target.dataset.f](e.target)});
 
 // Login: Supabase Auth (e-mail e senha) quando configurado; senão, usuário de teste local.
 // Usuário sem @ vira usuario@DOMINIO (o Supabase exige formato de e-mail, mas ninguém precisa de e-mail real).
 const DOM=CFG.dominio||"frota.app",mail=u=>{u=u.trim().toLowerCase();return u.includes("@")?u:u+"@"+DOM},nomeDe=e=>e.split("@")[0],
 USERS={felix:{nome:"Felix",senha:"123456"}},sess=()=>user;
 async function entrar(f){$("#lerr").hidden=true;const b=f.querySelector(".go");
- if(REMOTE){b.disabled=true;
+ if(REMOTE){b.disabled=true;busy(1);
   const{data,error}=await sb.auth.signInWithPassword({email:mail(f.usuario.value),password:f.senha.value});b.disabled=false;
-  if(error){$("#lerr").hidden=false;f.senha.value="";f.senha.focus();return}
-  f.reset();f.senha.type="password";return iniciar(nomeDe(data.user.email))}
+  if(error){busy(0);$("#lerr").hidden=false;f.senha.value="";f.senha.focus();return}
+  f.reset();f.senha.type="password";return iniciar(nomeDe(data.user.email),data.user.id)}
  const u=USERS[f.usuario.value.trim().toLowerCase()];
  if(!u||u.senha!==f.senha.value){$("#lerr").hidden=false;f.senha.value="";f.senha.focus();return}
  localStorage.setItem("cc-user",u.nome);f.reset();f.senha.type="password";iniciar(u.nome)}
-async function iniciar(nome){
- if(REMOTE)try{await load()}catch(e){console.error(e);toast("Não foi possível carregar os dados: "+(e.message||e),1);return}
- user=nome;document.body.dataset.auth=1;$("#nome").textContent=nome;route()}
+async function iniciar(nome,id){
+ busy(1);
+ try{if(REMOTE){await load();const{data,error}=await sb.from("perfis").select("*").eq("id",id).maybeSingle();if(error)throw error;
+   perfil=data?{...data,permissoes:data.permissoes||[]}:{nome,role:"lancador",permissoes:[]}}
+  else perfil={nome,role:"master",permissoes:[]}}
+ catch(e){console.error(e);toast("Não foi possível carregar os dados: "+(e.message||e),1);return}finally{busy(0)}
+ user=perfil.nome||nome;document.body.dataset.auth=1;$("#nome").textContent=user;montaMenu();route()}
 
-const PG={painel:dash,lancamentos:lanc,veiculos:()=>crud("veiculos"),motoristas:()=>crud("motoristas"),combustiveis:()=>crud("combustiveis"),fornecedores:()=>crud("fornecedores"),backup:bk};
-function route(){const p=PG[location.hash.slice(1)]?location.hash.slice(1):"painel";
+// Permissões: Painel e Lançamentos para todos; Veículos, Motoristas, Combustíveis e Fornecedores conforme o perfil;
+// Backup e Usuários só para o master (Usuários exige o Supabase). A proteção real dos dados está no RLS (supabase/perfis.sql).
+let perfil=null;
+const LIVRES=["painel","lancamentos"],OPC=[["veiculos","Veículos"],["motoristas","Motoristas"],["combustiveis","Combustíveis"],["fornecedores","Fornecedores"]],
+pode=p=>!!perfil&&(perfil.role==="master"?(p!=="usuarios"||REMOTE):LIVRES.includes(p)||OPC.some(o=>o[0]===p&&perfil.permissoes.includes(p))),
+MENU=[["painel","Painel"],["lancamentos","Lançamentos"],...OPC,["backup","Backup"],["usuarios","Usuários"]],
+montaMenu=()=>{$("nav").innerHTML=MENU.filter(m=>pode(m[0])).map(m=>`<a href="#${m[0]}">${m[1]}</a>`).join("")};
+
+// Tela Usuários (só master): cria e edita pela Edge Function admin-usuarios; a service_role fica só no servidor.
+let USR=[];
+const rotPerm=u=>u.role==="master"?"Acesso total":["Painel","Lançamentos",...OPC.filter(o=>u.permissoes.includes(o[0])).map(o=>o[1])].join(", ");
+const usuariosPg=()=>`<h1>Usuários</h1>
+<form class="panel grid" data-f=usuario>
+<label>Nome<input name=nome required></label>
+<label>E-mail<input name=email type=email required autocapitalize=none></label>
+<label>Senha<input name=senha type=password minlength=6 required autocomplete=new-password placeholder="Mínimo de 6 caracteres"></label>
+<fieldset class=perms><legend>Permissões padrão (sempre liberadas)</legend><label class=chk><input type=checkbox checked disabled> Painel</label><label class=chk><input type=checkbox checked disabled> Lançamentos</label></fieldset>
+<fieldset class=perms><legend>Permissões opcionais</legend>${OPC.map(o=>`<label class=chk><input type=checkbox name=perm value=${o[0]}> ${o[1]}</label>`).join("")}</fieldset>
+<button class=go>Cadastrar</button><button type=button data-a=clear>Limpar</button></form>
+<div id=ul><p class=empty>Carregando…</p></div>`;
+async function ulista(){const{data,error}=await sb.from("perfis").select("*").order("nome");
+ if(error)return $("#ul").innerHTML=`<p class=badtxt>Erro ao listar: ${esc(error.message)}</p>`;
+ USR=data.map(u=>({...u,permissoes:u.permissoes||[]}));
+ $("#ul").innerHTML=`<div class=panel><div class="scroll cards"><table><tr><th>Nome<th>E-mail<th>Perfil<th>Acesso<th></tr>${USR.map(u=>`<tr><td data-l=Nome>${esc(u.nome)}<td data-l="E-mail">${esc(u.email)}<td data-l=Perfil>${u.role==="master"?"Master":"Lançador"}<td data-l=Acesso>${esc(rotPerm(u))}<td><button data-a=uedit data-id="${u.id}">Editar</button>`).join("")}</table></div></div>`}
+async function adm(corpo){const{data,error}=await sb.functions.invoke("admin-usuarios",{body:corpo});
+ if(error){const m=await error.context?.json?.().catch(()=>null);throw new Error(m?.erro||error.message)}
+ if(data?.erro)throw new Error(data.erro);return data}
+async function salvaUsuario(f){
+ const corpo={acao:ed?"atualizar":"criar",id:ed||undefined,nome:f.nome.value.trim(),email:f.email.value.trim().toLowerCase(),senha:f.senha.value||undefined,permissoes:[...f.querySelectorAll("[name=perm]:checked")].map(c=>c.value)};
+ busy(1);try{await adm(corpo)}catch(e){return toast("Não foi possível salvar: "+e.message,1)}finally{busy(0)}
+ toast(ed?"Usuário atualizado.":"Usuário criado.");ed=0;route()}
+
+const PG={painel:dash,lancamentos:lanc,veiculos:()=>crud("veiculos"),motoristas:()=>crud("motoristas"),combustiveis:()=>crud("combustiveis"),fornecedores:()=>crud("fornecedores"),backup:bk,usuarios:usuariosPg};
+function route(){const h=location.hash.slice(1);let p=PG[h]?h:"painel";
+ if(!pode(p)){if(PG[h])toast("Esta tela não está liberada para o seu usuário.",1);p="painel";history.replaceState(null,"","#painel")}
  $("main").innerHTML=PG[p]();document.body.dataset.p=p;
  document.querySelectorAll("nav a").forEach(a=>a.hash.slice(1)===p?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
- if(p==="lancamentos"){if(pre){$("#oq").checked=true;if(S.v!==null&&S.v!=="all")$("[name=frota]").value=get("veiculos",S.v).frota;pre=0}finfo();if(matchMedia("(pointer:fine)").matches)$("[name=frota]").focus()}}
+ if(p==="lancamentos"){if(pre){$("#oq").checked=true;if(S.v!==null&&S.v!=="all")$("[name=frota]").value=get("veiculos",S.v).frota;pre=0}finfo();if(pend){A.edit({dataset:{n:"lancamentos",id:pend}});pend=0}else if(matchMedia("(pointer:fine)").matches)$("[name=frota]").focus()}
+ if(p==="usuarios")ulista()}
 onhashchange=()=>{ed=0;if(sess())route()};
 (async()=>{
- if(REMOTE){const{data}=await sb.auth.getSession();if(data.session)return iniciar(nomeDe(data.session.user.email))}
- else if(user)return iniciar(user);
+ if(!REMOTE&&user)return iniciar(user);
  if(matchMedia("(pointer:fine)").matches)$("#login input").focus()})();
